@@ -254,12 +254,11 @@ class DecoderLayer(nn.Module):
         self.attn_2 = MultiHeadAttention(heads, d_model, dropout=dropout)
         self.ff = FeedForward(d_model, dropout=dropout)
 
-    def forward(self, x, e_outputs, src_mask, trg_mask):
+    def forward(self, x, trg_mask):
         x2 = self.norm_1(x)
         x = x + self.dropout_1(self.attn_1(x2, x2, x2, trg_mask))
         x2 = self.norm_2(x)
-        x = x + self.dropout_2(self.attn_2(x2, e_outputs, e_outputs, \
-        src_mask))
+        x = x + self.dropout_2(self.attn_2(x2, x2, x2, trg_mask))
         x2 = self.norm_3(x)
         x = x + self.dropout_3(self.ff(x2))
         return x    
@@ -287,23 +286,23 @@ class Decoder(nn.Module):
         self.pe = PositionalEncoder(d_model, dropout=dropout)
         self.layers = get_clones(DecoderLayer(d_model, heads, dropout), N)
         self.norm = Norm(d_model)
-    def forward(self, trg, e_outputs, src_mask, trg_mask):
+    def forward(self, trg, trg_mask):
         x = self.embed(trg)
         x = self.pe(x)
         for i in range(self.N):
-            x = self.layers[i](x, e_outputs, src_mask, trg_mask)
+            x = self.layers[i](x, trg_mask)
         return self.norm(x)
 
 class Transformer(nn.Module):
     def __init__(self, src_vocab, trg_vocab, d_model, N, heads, dropout):
         super().__init__()
-        self.encoder = Encoder(src_vocab, d_model, N, heads, dropout)
+        #self.encoder = Encoder(src_vocab, d_model, N, heads, dropout)
         self.decoder = Decoder(trg_vocab, d_model, N, heads, dropout)
         self.out = nn.Linear(d_model, trg_vocab)
     def forward(self, src, trg, src_mask, trg_mask):
-        e_outputs = self.encoder(src, src_mask)
+        #e_outputs = self.encoder(src, src_mask)
         #print("DECODER")
-        d_output = self.decoder(trg, e_outputs, src_mask, trg_mask)
+        d_output = self.decoder(trg, trg_mask)
         output = self.out(d_output)
         return output
 
@@ -377,8 +376,8 @@ def main():
     opt.verbose = False    
     
     opt.device = 0 if opt.no_cuda is False else -1
-    if opt.device == 0:
-        assert torch.cuda.is_available()
+    #if opt.device == 0:
+        #assert torch.cuda.is_available()
     opt.device = torch.device("cuda:0")
     
     time_name = time.strftime("%y%m%d_%H%M%S")
@@ -387,9 +386,9 @@ def main():
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
     source_name = sys.argv[0]
-    dir_name = dir_name + "//"
-    opt.dir_name = dir_name
-    shutil.copy(source_name,dir_name + source_name)
+    # dir_name = dir_name + "//"
+    # opt.dir_name = dir_name
+    # shutil.copy(source_name,dir_name + source_name)
     opt.log_file = dir_name + "log_file.txt"
     
     print(str(opt))
