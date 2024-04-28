@@ -14,10 +14,12 @@ import torch.nn.functional as F
 import torch.nn as nn
 from torch.autograd import Variable
 from transformers import GPT2TokenizerFast
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
 
 def read_corpus(filename,tokenizer):
     seq = []
-    with open(filename,'rt') as f:
+    with open(filename,'rt', encoding = "utf") as f: # should be uft8
         for line in f:
             line = line.replace('\n','')
             tokens = tokenizer(line)
@@ -299,10 +301,14 @@ class Transformer(nn.Module):
         #self.encoder = Encoder(src_vocab, d_model, N, heads, dropout)
         self.decoder = Decoder(trg_vocab, d_model, N, heads, dropout)
         self.out = nn.Linear(d_model, trg_vocab)
-    def forward(self, src, trg, src_mask, trg_mask):
+
+        # My name is Bhavin Lauda (target_seq_len x Vocab_size)
+        # My name is Bhavin :: name is Bhavin Lauda
+
+    def forward(self, src, src_mask):
         #e_outputs = self.encoder(src, src_mask)
         #print("DECODER")
-        d_output = self.decoder(trg, trg_mask)
+        d_output = self.decoder(src, src_mask)
         output = self.out(d_output)
         return output
 
@@ -323,7 +329,33 @@ def get_model(opt, src_vocab, trg_vocab):
                 nn.init.xavier_uniform_(p) 
     
     return model
-    
+
+def get_data_loader( data, block_size, batch_size):
+    dataset = TextDataset( data, block_size)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+class TextDataset(Dataset):
+    def __init__(self, data ,block_size):
+
+        self.tokens = data
+        self.block_size = block_size
+
+    def __len__(self):
+        return len(self.tokens) - self.block_size
+
+    def __getitem__(self, idx):
+        # Ensures that we return 'block_size' tokens and the next token as the target
+        chunk = self.tokens[idx:idx + self.block_size + 1]
+        input_ids = torch.tensor(chunk[:-1], dtype=torch.long)
+        
+        input_ids = F.one_hot(input_ids, num_classes=50257).float()
+        target_ids = torch.tensor(chunk[1:], dtype=torch.long)
+        # Convert target_ids to one-hot encoded tensor
+        target_ids = F.one_hot(target_ids, num_classes=50257).float()
+
+        # Create a mask where target tokens are not padding (assuming padding token ID is 0)
+        mask = (target_ids != 0).float()
+        
+        return input_ids, target_ids, mask
 def train_model(model, opt):
     
     print("training model...")
@@ -332,6 +364,7 @@ def train_model(model, opt):
     # write code to:
     #  1. create a nopeak mask
     #  2. feed training data to the model in batches
+
     #  3. send the indices of training tokens to the GPU
     #  4. linearize the predictions and compute the loss against ground truth
     #     (you can use F.cross_entropy or write your own code)
@@ -340,6 +373,25 @@ def train_model(model, opt):
     #  7. generate a test perplexity once per training epoch by calling test_model()
     #  8. save model weights to file specified in opt.savename
     #  SEE trainer.py for examples of each of the above
+
+    train_dataloader = get_data_loader(opt.train, opt.seqlen, opt.batchsize)
+
+    for epoch in range(opt.epochs):
+        for idx, batch in enumerate(train_dataloader):
+            input_ids, target_ids, mask = batch
+            input_ids = input_ids.to(opt.device)
+            target_ids = target_ids.to(opt.device)
+            mask = mask.to(opt.device)
+
+            output = model(input_ids, mask)
+            loss = F.cross_entropy(output, target_ids)
+            loss.backward()
+            opt.optimizer.step()
+            opt.optimizer.zero_grad()
+            if idx % opt.printevery == 0:
+                print("Loss: ", loss.item())
+        
+            
     
 def test_model(model, opt, epoch):
     print("testing model...")
@@ -356,15 +408,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-SGDR', action='store_true')
-    parser.add_argument('-epochs', type=int, default=20)
-    parser.add_argument('-d_model', type=int, default=512)
-    parser.add_argument('-n_layers', type=int, default=6)
-    parser.add_argument('-heads', type=int, default=8)
+    parser.add_argument('-epochs', type=int, default=5)
+    parser.add_argument('-d_model', type=int, default=64)
+    parser.add_argument('-n_layers', type=int, default=1)
+    parser.add_argument('-heads', type=int, default=1)
     parser.add_argument('-dropout', type=int, default=0.1)
     parser.add_argument('-batchsize', type=int, default=1)
-    parser.add_argument('-printevery', type=int, default=100)
+    parser.add_argument('-printevery', type=int, default=1)
     parser.add_argument('-lr', type=int, default=0.00001)
-    parser.add_argument('-seqlen', type=int, default=512)
+    parser.add_argument('-seqlen', type=int, default=1)
     parser.add_argument('-threshold', type=int, default=3)
     parser.add_argument('-savename', type=str)    
     parser.add_argument('-loadname', type=str)    
@@ -394,7 +446,7 @@ def main():
     print(str(opt))
     
     tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-    opt.train = read_corpus('wiki2.train.txt',tokenizer)
+    opt.train = read_corpus('wiki2.train.txt',tokenizer) # Sentence wise tokenization
     opt.valid = read_corpus('wiki2.valid.txt',tokenizer)
     opt.test = read_corpus('wiki2.test.txt',tokenizer)
     
